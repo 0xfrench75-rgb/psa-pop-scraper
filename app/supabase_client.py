@@ -70,6 +70,8 @@ async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int
         resp = await client.patch(url, json=body, headers=headers)
         if resp.status_code < 300:
             updated += 1
+        else:
+            logger.warning(f"Pop update failed for tcg_id={u['tcg_product_id']}: {resp.status_code}")
     return updated
 
 

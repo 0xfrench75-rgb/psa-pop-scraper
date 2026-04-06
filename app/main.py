@@ -18,7 +18,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from app.config import SCRAPER_API_KEY
 from app.scraper import scrape_sets
 from app.sales_scraper import scrape_sales_batch
-from app.matcher import match_cards, build_lookup
+from app.matcher import match_cards, build_lookup, normalize
 from app.supabase_client import (
     get_set_mappings,
     get_cards_for_group,
@@ -55,12 +55,7 @@ def _check_auth(request: Request):
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "last_result": _last_result,
-        "api_key_len": len(SCRAPER_API_KEY),
-        "api_key_prefix": SCRAPER_API_KEY[:4] if len(SCRAPER_API_KEY) > 4 else "short",
-    }
+    return {"status": "ok", "last_result": _last_result}
 
 
 @app.get("/status")
@@ -217,21 +212,34 @@ async def _run_sales_scrape(game_id: str):
                 }
                 return
 
-            # Collect all spec_ids from matched pop data
+            # Collect spec_ids by scraping pop data for each set mapping
+            # Also build spec_id -> tcg_product_id lookup for matching sales
             all_spec_ids = set()
+            spec_to_tcg: dict[int, int] = {}
+
             for mapping in mappings:
                 our_cards = await get_cards_for_group(client, mapping["group_id"])
-                # We need spec_ids - these come from previous pop scrapes
-                # For now, scrape pop first to get spec_ids, then use them
-                from app.scraper import scrape_sets
-                scraped = await scrape_sets([mapping])
-                cards = scraped.get(mapping["psa_set_id"], [])
-                for c in cards:
-                    if c.get("spec_id") and c["spec_id"] > 0:
-                        all_spec_ids.add(c["spec_id"])
+                if not our_cards:
+                    continue
+
+                lookup = build_lookup(our_cards)
+                scraped_by_set = await scrape_sets([mapping])
+                from app.scraper import parse_cards
+                raw_cards = scraped_by_set.get(mapping["psa_set_id"], [])
+
+                for c in raw_cards:
+                    spec_id = c.get("spec_id", 0)
+                    if not spec_id or spec_id <= 0:
+                        continue
+                    all_spec_ids.add(spec_id)
+
+                    # Match this card to our catalog for tcg_product_id
+                    norm_name = normalize(c.get("card_name", ""))
+                    if norm_name in lookup:
+                        spec_to_tcg[spec_id] = lookup[norm_name]
 
             spec_list = sorted(all_spec_ids)
-            logger.info(f"Sales scrape {game_id}: {len(spec_list)} spec IDs to process")
+            logger.info(f"Sales scrape {game_id}: {len(spec_list)} spec IDs, {len(spec_to_tcg)} matched to catalog")
 
             if not spec_list:
                 _last_result = {
@@ -242,14 +250,15 @@ async def _run_sales_scrape(game_id: str):
                 }
                 return
 
-            # Scrape sales in batches
+            # Scrape sales in batches via Playwright
             results = await scrape_sales_batch(spec_list)
 
-            # Flatten and insert all sales
+            # Flatten, match tcg_product_id, and insert
             all_sales = []
             for spec_id, sales in results.items():
                 for s in sales:
                     s["game_id"] = game_id
+                    s["tcg_product_id"] = spec_to_tcg.get(spec_id)
                 all_sales.extend(sales)
 
             inserted = await upsert_sales_history(client, all_sales)
