@@ -4,3 +4,4 @@ curl-cffi
 httpx
 thefuzz
 python-Levenshtein
+playwright

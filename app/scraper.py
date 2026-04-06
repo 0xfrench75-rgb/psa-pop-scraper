@@ -76,8 +76,8 @@ async def fetch_set_data(session: AsyncSession, psa_set_id: int) -> list[dict] |
 def parse_cards(raw_cards: list[dict]) -> list[dict]:
     """Extract the fields we need from PSA's raw API response.
 
-    Input fields: SpecID, SubjectName, Variety, CardNumber, Grade10, GradeTotal
-    Output fields: card_name, variant, card_number, psa10_pop, total_pop, spec_id
+    Input fields: SpecID, SubjectName, Variety, CardNumber, Grade9, Grade10, GradeTotal
+    Output fields: card_name, variant, card_number, psa9_pop, psa10_pop, total_pop, spec_id
     """
     results = []
     for c in raw_cards:
@@ -86,6 +86,7 @@ def parse_cards(raw_cards: list[dict]) -> list[dict]:
             "card_name": c.get("SubjectName", ""),
             "variant": c.get("Variety") or "",
             "card_number": c.get("CardNumber", ""),
+            "psa9_pop": c.get("Grade9", 0),
             "psa10_pop": c.get("Grade10", 0),
             "total_pop": c.get("GradeTotal", 0),
         })
