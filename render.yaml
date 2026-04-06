@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: psa-pop-scraper
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SCRAPER_API_KEY
+        sync: false

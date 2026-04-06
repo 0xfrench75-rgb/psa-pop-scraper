@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+curl-cffi
+httpx
+thefuzz
+python-Levenshtein
