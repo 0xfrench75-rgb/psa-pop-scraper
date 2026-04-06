@@ -93,7 +93,7 @@ async def _run_scrape(game_id: str | None):
         games_processed = []
 
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=60) as client:
                 # Get set mappings
                 mappings = await get_set_mappings(client, game_id)
                 if not mappings:
