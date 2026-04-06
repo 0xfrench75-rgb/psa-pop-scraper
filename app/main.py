@@ -51,7 +51,12 @@ def _check_auth(request: Request):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "last_result": _last_result}
+    return {
+        "status": "ok",
+        "last_result": _last_result,
+        "api_key_len": len(SCRAPER_API_KEY),
+        "api_key_prefix": SCRAPER_API_KEY[:4] if len(SCRAPER_API_KEY) > 4 else "short",
+    }
 
 
 @app.get("/status")
