@@ -1,7 +1,8 @@
 """PSA pop data fetcher via /Pop/GetSetItems JSON API.
 
-PSA's pop report pages use DataTables with server-side AJAX. The endpoint
-returns structured JSON directly - no HTML parsing needed.
+Two capabilities:
+1. discover_all_sets() - crawls PSA's pop report site to find all TCG sets
+2. scrape_sets() - fetches population data for a list of sets
 
 Endpoint: POST https://www.psacard.com/Pop/GetSetItems
 Params: headingID (set ID), categoryID ("156940" for TCG cards), length, start, draw
@@ -10,6 +11,7 @@ Returns: {data: [{SpecID, SubjectName, Variety, CardNumber, Grade10, GradeTotal,
 
 import asyncio
 import logging
+import re
 from curl_cffi.requests import AsyncSession
 
 from app.config import CRAWL_DELAY
@@ -17,9 +19,95 @@ from app.config import CRAWL_DELAY
 logger = logging.getLogger(__name__)
 
 PSA_API_URL = "https://www.psacard.com/Pop/GetSetItems"
-# NOTE: "156940" is the PSA category ID for all TCG cards. Hardcoded because
-# it's the same for every TCG set on PSA's site.
+PSA_POP_BASE = "https://www.psacard.com/pop/tcg-cards"
 TCG_CATEGORY_ID = "156940"
+
+# Game keywords to filter PSA set slugs
+GAME_KEYWORDS = {
+    "pokemon": "pokemon",
+    "one-piece": "one-piece",
+    "dragon-ball-super": "dragon-ball",
+}
+# Languages to exclude (keep English only)
+EXCLUDE_LANGS = [
+    "japanese", "korean", "french", "german", "spanish", "italian",
+    "portuguese", "chinese", "thai", "indonesian",
+]
+DISCOVERY_DELAY = 2.0  # Slower delay for discovery crawl (avoid rate limit)
+
+
+async def discover_all_sets() -> list[dict]:
+    """Crawl PSA's pop report site to discover all TCG card sets for our games.
+
+    Returns list of dicts: {game_id, psa_set_id, psa_set_slug, psa_year}
+    """
+    all_sets = []
+    async with AsyncSession() as session:
+        # Step 1: Get year category IDs from the TCG cards index page
+        try:
+            resp = await session.get(f"{PSA_POP_BASE}/{TCG_CATEGORY_ID}", impersonate="chrome", timeout=30)
+            if resp.status_code != 200:
+                logger.error(f"Failed to fetch TCG index: {resp.status_code}")
+                return []
+        except Exception as e:
+            logger.error(f"Failed to fetch TCG index: {e}")
+            return []
+
+        year_cats = re.findall(r"/pop/tcg-cards/(20[2][0-9][^/]*)/(\d+)", resp.text)
+        year_map = {}
+        for y, cid in set(year_cats):
+            year_map[y] = cid
+        logger.info(f"Discovery: found {len(year_map)} year categories")
+
+        # Step 2: For each year, find all sets matching our games
+        for year in sorted(year_map.keys()):
+            await asyncio.sleep(DISCOVERY_DELAY)
+            cid = year_map[year]
+            try:
+                resp = await session.get(f"{PSA_POP_BASE}/{year}/{cid}", impersonate="chrome", timeout=30)
+                if resp.status_code != 200:
+                    logger.warning(f"Discovery: failed year {year}: HTTP {resp.status_code}")
+                    continue
+            except Exception as e:
+                logger.warning(f"Discovery: failed year {year}: {e}")
+                continue
+
+            # Extract set links: /pop/tcg-cards/{year}/{slug}/{setId}
+            sets_found = re.findall(
+                r"/pop/tcg-cards/" + re.escape(year) + r"/([^/\"]+)/(\d+)",
+                resp.text,
+            )
+
+            for slug, sid in set(sets_found):
+                lower = slug.lower()
+
+                # Skip non-English
+                if any(lang in lower for lang in EXCLUDE_LANGS):
+                    continue
+
+                # Match to our games
+                for game_id, keyword in GAME_KEYWORDS.items():
+                    if keyword in lower:
+                        all_sets.append({
+                            "game_id": game_id,
+                            "psa_set_id": int(sid),
+                            "psa_set_slug": slug,
+                            "psa_year": year,
+                        })
+                        break
+
+            logger.info(f"Discovery: year {year} -> {len(sets_found)} total, {len(all_sets)} ours so far")
+
+    # Deduplicate by psa_set_id
+    seen = set()
+    unique = []
+    for s in all_sets:
+        if s["psa_set_id"] not in seen:
+            seen.add(s["psa_set_id"])
+            unique.append(s)
+
+    logger.info(f"Discovery complete: {len(unique)} unique sets across {len(GAME_KEYWORDS)} games")
+    return unique
 
 
 async def fetch_set_data(session: AsyncSession, psa_set_id: int) -> list[dict] | None:

@@ -16,12 +16,13 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from app.config import SCRAPER_API_KEY
-from app.scraper import scrape_sets
+from app.scraper import scrape_sets, discover_all_sets
 from app.sales_scraper import scrape_sales_batch
 from app.matcher import match_cards, build_lookup, normalize
 from app.supabase_client import (
     get_set_mappings,
     get_cards_for_group,
+    get_all_cards_for_game,
     update_pop_data,
     get_spec_ids_for_game,
     upsert_sales_history,
@@ -103,50 +104,52 @@ async def _run_scrape(game_id: str | None):
 
         client = httpx.AsyncClient(timeout=60)
         try:
-            # Get set mappings
-            mappings = await get_set_mappings(client, game_id)
-            if not mappings:
+            # Auto-discover all sets from PSA website
+            logger.info("Discovering sets from PSA...")
+            all_discovered = await discover_all_sets()
+            if not all_discovered:
                 _last_result = {
-                    "status": "skipped",
-                    "reason": f"No set mappings found for {game_id or 'any game'}",
+                    "status": "failed",
+                    "reason": "Set discovery returned 0 sets (PSA may be blocking)",
                     "duration_ms": int((time.time() - start) * 1000),
                 }
                 await log_scrape(client, _last_result)
                 return
 
-            # Group mappings by game_id
+            # Filter to requested game if specified
+            if game_id:
+                all_discovered = [s for s in all_discovered if s["game_id"] == game_id]
+
+            logger.info(f"Discovered {len(all_discovered)} sets to scrape")
+
+            # Group by game_id
             by_game: dict[str, list[dict]] = {}
-            for m in mappings:
+            for m in all_discovered:
                 by_game.setdefault(m["game_id"], []).append(m)
 
             for gid, sets in by_game.items():
                 logger.info(f"Scraping {gid}: {len(sets)} sets")
 
+                # Get ALL our catalog cards for this game (once, reuse for all sets)
+                our_cards = await get_all_cards_for_game(client, gid)
+                if not our_cards:
+                    logger.warning(f"No cards in DB for game {gid}")
+                    continue
+                lookup = build_lookup(our_cards)
+                logger.info(f"  Loaded {len(our_cards)} catalog cards for matching")
+
                 # Scrape all sets for this game
                 scraped_by_set = await scrape_sets(sets)
 
-                # Match and update per set
-                for mapping in sets:
-                    scraped_cards = scraped_by_set.get(mapping["psa_set_id"], [])
+                # Match all scraped cards against our catalog
+                for s in sets:
+                    scraped_cards = scraped_by_set.get(s["psa_set_id"], [])
                     if not scraped_cards:
                         continue
 
-                    # Get our catalog cards for this group
-                    our_cards = await get_cards_for_group(client, mapping["group_id"])
-                    if not our_cards:
-                        logger.warning(f"No cards in DB for group {mapping['group_id']}")
-                        continue
-
-                    lookup = build_lookup(our_cards)
                     matched, unmatched = match_cards(scraped_cards, lookup)
                     total_matched += len(matched)
                     total_unmatched += len(unmatched)
-
-                    if unmatched:
-                        logger.info(
-                            f"  {mapping['psa_set_slug']}: {len(unmatched)} unmatched: "
-                            + ", ".join(u["card_name"][:30] for u in unmatched[:5])
-                        )
 
                     # Write population data to Supabase
                     if matched:

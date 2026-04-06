@@ -42,6 +42,30 @@ async def get_cards_for_group(client: httpx.AsyncClient, group_id: int) -> list[
     return resp.json()
 
 
+async def get_all_cards_for_game(client: httpx.AsyncClient, game_id: str) -> list[dict]:
+    """Fetch ALL cards for a game. Used when we don't have group_id mapping."""
+    all_cards = []
+    offset = 0
+    page_size = 1000
+    headers = {**HEADERS, "Accept-Profile": "shared"}
+    while True:
+        url = (
+            f"{REST_URL}/cards"
+            f"?select=tcg_product_id,clean_name,name"
+            f"&game_id=eq.{game_id}"
+            f"&order=tcg_product_id"
+            f"&offset={offset}&limit={page_size}"
+        )
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        batch = resp.json()
+        all_cards.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return all_cards
+
+
 async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int:
     """Batch update psa10_pop, total_pop on psa_arbitrage_opportunities.
 
