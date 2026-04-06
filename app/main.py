@@ -172,7 +172,7 @@ async def _run_scrape(game_id: str | None):
             _last_result = {
                 "status": "success",
                 "games": games_processed,
-                "sets_scraped": len(mappings),
+                "sets_scraped": len(all_discovered),
                 "matched": total_matched,
                 "unmatched": total_unmatched,
                 "updated": total_updated,
