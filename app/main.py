@@ -151,15 +151,40 @@ async def _run_scrape(game_id: str | None):
                     total_matched += len(matched)
                     total_unmatched += len(unmatched)
 
-                    # Write population data to Supabase
+                    # Write population data to Supabase (full grade distribution)
                     if matched:
                         updates = [
                             {
                                 "tcg_product_id": c["tcg_product_id"],
                                 "psa9_pop": c.get("psa9_pop", 0),
-                                "psa10_pop": c["psa10_pop"],
-                                "total_pop": c["total_pop"],
+                                "psa10_pop": c.get("psa10_pop", 0),
+                                "total_pop": c.get("total_pop", 0),
                                 "spec_id": c.get("spec_id", 0),
+                                "game_id": gid,
+                                "psa_set_id": s["psa_set_id"],
+                                "card_name": c.get("card_name", ""),
+                                "card_number": c.get("card_number", ""),
+                                "variant": c.get("variant", ""),
+                                # Full grade distribution
+                                "grade_authentic": c.get("grade_authentic", 0),
+                                "grade_1": c.get("grade_1", 0),
+                                "grade_1_5": c.get("grade_1_5", 0),
+                                "grade_2": c.get("grade_2", 0),
+                                "grade_2_5": c.get("grade_2_5", 0),
+                                "grade_3": c.get("grade_3", 0),
+                                "grade_3_5": c.get("grade_3_5", 0),
+                                "grade_4": c.get("grade_4", 0),
+                                "grade_4_5": c.get("grade_4_5", 0),
+                                "grade_5": c.get("grade_5", 0),
+                                "grade_5_5": c.get("grade_5_5", 0),
+                                "grade_6": c.get("grade_6", 0),
+                                "grade_6_5": c.get("grade_6_5", 0),
+                                "grade_7": c.get("grade_7", 0),
+                                "grade_7_5": c.get("grade_7_5", 0),
+                                "grade_8": c.get("grade_8", 0),
+                                "grade_8_5": c.get("grade_8_5", 0),
+                                "half_grade_total": c.get("half_grade_total", 0),
+                                "qualified_total": c.get("qualified_total", 0),
                             }
                             for c in matched
                         ]

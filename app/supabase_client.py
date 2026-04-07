@@ -67,16 +67,20 @@ async def get_all_cards_for_game(client: httpx.AsyncClient, game_id: str) -> lis
 
 
 async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int:
-    """Batch update psa10_pop, total_pop on psa_arbitrage_opportunities.
+    """Batch update pop data on psa_arbitrage_opportunities + upsert full grade data to psa_pop_data.
 
-    Each update dict: {tcg_product_id, psa9_pop, psa10_pop, total_pop, spec_id}
-    Returns count of updated rows.
+    Each update dict: {tcg_product_id, psa9_pop, psa10_pop, total_pop, spec_id, grade_1..grade_10, etc.}
+    Returns count of updated rows on arbitrage table.
     """
     now = datetime.now(timezone.utc).isoformat()
     updated = 0
-    # PATCH one at a time (PostgREST doesn't support bulk PATCH by different PKs)
     headers = {**HEADERS, "Content-Profile": "shared", "Accept-Profile": "shared"}
+
+    # Collect full grade data for bulk upsert to psa_pop_data
+    pop_rows = []
+
     for u in updates:
+        # 1. PATCH arbitrage table (legacy - psa9, psa10, total only)
         url = f"{REST_URL}/psa_arbitrage_opportunities?tcg_product_id=eq.{u['tcg_product_id']}"
         psa10 = u["psa10_pop"]
         total = u["total_pop"]
@@ -88,7 +92,6 @@ async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int
             "psa10_rate": rate,
             "pop_fetched_at": now,
         }
-        # Only set spec_id if provided (not all cards have one)
         if u.get("spec_id"):
             body["psa_spec_id"] = u["spec_id"]
         resp = await client.patch(url, json=body, headers=headers)
@@ -96,7 +99,67 @@ async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int
             updated += 1
         else:
             logger.warning(f"Pop update failed for tcg_id={u['tcg_product_id']}: {resp.status_code}")
+
+        # 2. Build psa_pop_data row with full grade distribution
+        if u.get("spec_id"):
+            pop_rows.append({
+                "spec_id": u["spec_id"],
+                "game_id": u.get("game_id", ""),
+                "psa_set_id": u.get("psa_set_id", 0),
+                "card_name": u.get("card_name", ""),
+                "card_number": u.get("card_number", ""),
+                "variant": u.get("variant", ""),
+                "tcg_product_id": u["tcg_product_id"],
+                "psa9_pop": u.get("psa9_pop", 0),
+                "psa10_pop": psa10,
+                "total_pop": total,
+                "grade_authentic": u.get("grade_authentic", 0),
+                "grade_1": u.get("grade_1", 0),
+                "grade_1_5": u.get("grade_1_5", 0),
+                "grade_2": u.get("grade_2", 0),
+                "grade_2_5": u.get("grade_2_5", 0),
+                "grade_3": u.get("grade_3", 0),
+                "grade_3_5": u.get("grade_3_5", 0),
+                "grade_4": u.get("grade_4", 0),
+                "grade_4_5": u.get("grade_4_5", 0),
+                "grade_5": u.get("grade_5", 0),
+                "grade_5_5": u.get("grade_5_5", 0),
+                "grade_6": u.get("grade_6", 0),
+                "grade_6_5": u.get("grade_6_5", 0),
+                "grade_7": u.get("grade_7", 0),
+                "grade_7_5": u.get("grade_7_5", 0),
+                "grade_8": u.get("grade_8", 0),
+                "grade_8_5": u.get("grade_8_5", 0),
+                "half_grade_total": u.get("half_grade_total", 0),
+                "qualified_total": u.get("qualified_total", 0),
+                "fetched_at": now,
+            })
+
+    # Bulk upsert full grade data to psa_pop_data
+    if pop_rows:
+        await _upsert_pop_data(client, pop_rows)
+
     return updated
+
+
+async def _upsert_pop_data(client: httpx.AsyncClient, rows: list[dict]) -> int:
+    """Upsert full grade distribution to psa_pop_data. ON CONFLICT(spec_id) update all fields."""
+    headers = {
+        **HEADERS,
+        "Content-Profile": "shared",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    url = f"{REST_URL}/psa_pop_data"
+    upserted = 0
+    for i in range(0, len(rows), 50):
+        chunk = rows[i : i + 50]
+        resp = await client.post(url, json=chunk, headers=headers)
+        if resp.status_code < 300:
+            upserted += len(chunk)
+        else:
+            logger.warning(f"Pop data upsert failed: {resp.status_code} {resp.text[:200]}")
+    logger.info(f"Upserted {upserted} rows to psa_pop_data")
+    return upserted
 
 
 async def get_spec_ids_for_game(client: httpx.AsyncClient, game_id: str) -> list[dict]:

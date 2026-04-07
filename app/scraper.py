@@ -164,8 +164,9 @@ async def fetch_set_data(session: AsyncSession, psa_set_id: int) -> list[dict] |
 def parse_cards(raw_cards: list[dict]) -> list[dict]:
     """Extract the fields we need from PSA's raw API response.
 
-    Input fields: SpecID, SubjectName, Variety, CardNumber, Grade9, Grade10, GradeTotal
-    Output fields: card_name, variant, card_number, psa9_pop, psa10_pop, total_pop, spec_id
+    Input: SpecID, SubjectName, Variety, CardNumber, Grade1-Grade10, Grade1_5-Grade8_5,
+           Grade1Q-Grade9Q, GradeN0, GradeTotal, HalfGradeTotal, QualifiedGradeTotal
+    Output: full grade distribution (PSA 1-10, half grades, qualified, authentic)
     """
     results = []
     for c in raw_cards:
@@ -174,9 +175,33 @@ def parse_cards(raw_cards: list[dict]) -> list[dict]:
             "card_name": c.get("SubjectName", ""),
             "variant": c.get("Variety") or "",
             "card_number": c.get("CardNumber", ""),
+            # Full grade distribution
+            "grade_authentic": c.get("GradeN0", 0),
+            "grade_1": c.get("Grade1", 0),
+            "grade_1_5": c.get("Grade1_5", 0),
+            "grade_2": c.get("Grade2", 0),
+            "grade_2_5": c.get("Grade2_5", 0),
+            "grade_3": c.get("Grade3", 0),
+            "grade_3_5": c.get("Grade3_5", 0),
+            "grade_4": c.get("Grade4", 0),
+            "grade_4_5": c.get("Grade4_5", 0),
+            "grade_5": c.get("Grade5", 0),
+            "grade_5_5": c.get("Grade5_5", 0),
+            "grade_6": c.get("Grade6", 0),
+            "grade_6_5": c.get("Grade6_5", 0),
+            "grade_7": c.get("Grade7", 0),
+            "grade_7_5": c.get("Grade7_5", 0),
+            "grade_8": c.get("Grade8", 0),
+            "grade_8_5": c.get("Grade8_5", 0),
+            "grade_9": c.get("Grade9", 0),
+            "grade_10": c.get("Grade10", 0),
+            # Totals
+            "total_pop": c.get("GradeTotal", 0),
+            "half_grade_total": c.get("HalfGradeTotal", 0),
+            "qualified_total": c.get("QualifiedGradeTotal", 0),
+            # Legacy aliases for existing code
             "psa9_pop": c.get("Grade9", 0),
             "psa10_pop": c.get("Grade10", 0),
-            "total_pop": c.get("GradeTotal", 0),
         })
     return results
 
