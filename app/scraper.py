@@ -24,6 +24,7 @@ TCG_CATEGORY_ID = "156940"
 
 # Game keywords to filter PSA set slugs
 GAME_KEYWORDS = {
+    "sorcery": "sorcery",
     "pokemon": "pokemon",
     "one-piece": "one-piece",
     "dragon-ball-super": "dragon-ball",
