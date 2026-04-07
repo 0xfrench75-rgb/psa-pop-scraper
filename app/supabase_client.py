@@ -79,8 +79,9 @@ async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int
     # Collect full grade data for bulk upsert to psa_pop_data
     pop_rows = []
 
-    # Batch PATCH arbitrage table - collect all tcg_product_ids first, then patch in chunks
-    for u in updates:
+    import asyncio
+
+    for i, u in enumerate(updates):
         psa10 = u["psa10_pop"]
         psa9 = u.get("psa9_pop", 0)
         total = u["total_pop"]
@@ -95,13 +96,28 @@ async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int
         if u.get("spec_id"):
             body["psa_spec_id"] = u["spec_id"]
 
-        # PATCH only updates existing rows (cards already in arbitrage table from eBay sync)
         url = f"{REST_URL}/psa_arbitrage_opportunities?tcg_product_id=eq.{u['tcg_product_id']}"
-        resp = await client.patch(url, json=body, headers=headers)
-        if resp.status_code < 300:
-            updated += 1
-        else:
-            logger.warning(f"Pop update failed for tcg_id={u['tcg_product_id']}: {resp.status_code}")
+
+        # Retry up to 3 times with backoff on connection errors
+        for attempt in range(3):
+            try:
+                resp = await client.patch(url, json=body, headers=headers)
+                if resp.status_code < 300:
+                    updated += 1
+                else:
+                    logger.warning(f"Pop update failed for tcg_id={u['tcg_product_id']}: {resp.status_code}")
+                break
+            except Exception as e:
+                if attempt < 2:
+                    wait = (attempt + 1) * 5
+                    logger.warning(f"PATCH retry {attempt+1} for tcg_id={u['tcg_product_id']}: {e}, waiting {wait}s")
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"PATCH failed after 3 attempts for tcg_id={u['tcg_product_id']}: {e}")
+
+        # Small delay every 50 PATCHes to avoid overwhelming Supabase
+        if (i + 1) % 50 == 0:
+            await asyncio.sleep(1)
 
         # 2. Build psa_pop_data row with full grade distribution
         if u.get("spec_id"):
@@ -147,6 +163,7 @@ async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int
 
 async def _upsert_pop_data(client: httpx.AsyncClient, rows: list[dict]) -> int:
     """Upsert full grade distribution to psa_pop_data. ON CONFLICT(spec_id) update all fields."""
+    import asyncio
     headers = {
         **HEADERS,
         "Content-Profile": "shared",
@@ -156,11 +173,21 @@ async def _upsert_pop_data(client: httpx.AsyncClient, rows: list[dict]) -> int:
     upserted = 0
     for i in range(0, len(rows), 50):
         chunk = rows[i : i + 50]
-        resp = await client.post(url, json=chunk, headers=headers)
-        if resp.status_code < 300:
-            upserted += len(chunk)
-        else:
-            logger.warning(f"Pop data upsert failed: {resp.status_code} {resp.text[:200]}")
+        for attempt in range(3):
+            try:
+                resp = await client.post(url, json=chunk, headers=headers)
+                if resp.status_code < 300:
+                    upserted += len(chunk)
+                else:
+                    logger.warning(f"Pop data upsert failed: {resp.status_code} {resp.text[:200]}")
+                break
+            except Exception as e:
+                if attempt < 2:
+                    logger.warning(f"Pop data upsert retry {attempt+1}: {e}")
+                    await asyncio.sleep((attempt + 1) * 5)
+                else:
+                    logger.error(f"Pop data upsert failed after 3 attempts: {e}")
+        await asyncio.sleep(0.5)  # Small delay between chunks
     logger.info(f"Upserted {upserted} rows to psa_pop_data")
     return upserted
 
