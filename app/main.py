@@ -1,10 +1,10 @@
-"""PSA Population + Sales History Scraper - FastAPI service.
+"""PSA Population Scraper - FastAPI service.
 
-Two scraping modes:
-1. Pop report (/scrape/{game_id}): bulk population data via PSA's /Pop/GetSetItems JSON API (curl_cffi)
-2. Sales history (/scrape-sales/{game_id}): per-card sales via PSA spec pages (Playwright headless Chromium)
+Bulk population data via PSA's /Pop/GetSetItems JSON API (curl_cffi).
+Writes pop data to both psa_pop_data (full grade distribution) and
+psa_arbitrage_opportunities (psa9/10 pop, total, rate).
 
-Deployed on Render.com free tier (512 MB). Triggered by Oracle n8n cron or manual HTTP call.
+Deployed on Render.com free tier (512 MB). Triggered by Apps Script daily cron.
 """
 
 import asyncio
@@ -17,15 +17,10 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from app.config import SCRAPER_API_KEY
 from app.scraper import scrape_sets, discover_all_sets, FALLBACK_SETS
-from app.sales_scraper import scrape_sales_batch
-from app.matcher import match_cards, build_lookup, normalize
+from app.matcher import match_cards, build_lookup
 from app.supabase_client import (
-    get_set_mappings,
-    get_cards_for_group,
     get_all_cards_for_game,
     update_pop_data,
-    get_spec_ids_for_game,
-    upsert_sales_history,
     log_scrape,
 )
 
@@ -81,15 +76,6 @@ async def scrape_all(request: Request, background_tasks: BackgroundTasks):
     background_tasks.add_task(_run_scrape, None)
     return {"message": "Scrape started for all games", "status": "queued"}
 
-
-@app.post("/scrape-sales/{game_id}")
-async def scrape_sales(game_id: str, request: Request, background_tasks: BackgroundTasks):
-    """Scrape PSA sales history for cards in a game. Uses Playwright (heavier, ~300MB RAM)."""
-    _check_auth(request)
-    if _scrape_lock.locked():
-        raise HTTPException(status_code=409, detail="Scrape already in progress")
-    background_tasks.add_task(_run_sales_scrape, game_id)
-    return {"message": f"Sales scrape started for {game_id}", "status": "queued"}
 
 
 async def _run_scrape(game_id: str | None):
@@ -217,100 +203,3 @@ async def _run_scrape(game_id: str | None):
             await client.aclose()
 
 
-async def _run_sales_scrape(game_id: str):
-    """Scrape PSA sales history for cards in a game. Uses Playwright."""
-    global _last_result
-    async with _scrape_lock:
-        start = time.time()
-        client = httpx.AsyncClient(timeout=60)
-        try:
-            # Get spec IDs for this game from our pop data
-            mappings = await get_set_mappings(client, game_id)
-            if not mappings:
-                _last_result = {
-                    "status": "skipped",
-                    "job": "sales",
-                    "reason": f"No set mappings for {game_id}",
-                    "duration_ms": int((time.time() - start) * 1000),
-                }
-                return
-
-            # Collect spec_ids by scraping pop data for each set mapping
-            # Also build spec_id -> tcg_product_id lookup for matching sales
-            all_spec_ids = set()
-            spec_to_tcg: dict[int, int] = {}
-
-            for mapping in mappings:
-                our_cards = await get_cards_for_group(client, mapping["group_id"])
-                if not our_cards:
-                    continue
-
-                lookup = build_lookup(our_cards)
-                scraped_by_set = await scrape_sets([mapping])
-                from app.scraper import parse_cards
-                raw_cards = scraped_by_set.get(mapping["psa_set_id"], [])
-
-                for c in raw_cards:
-                    spec_id = c.get("spec_id", 0)
-                    if not spec_id or spec_id <= 0:
-                        continue
-                    all_spec_ids.add(spec_id)
-
-                    # Match this card to our catalog for tcg_product_id
-                    norm_name = normalize(c.get("card_name", ""))
-                    if norm_name in lookup:
-                        spec_to_tcg[spec_id] = lookup[norm_name]
-
-            spec_list = sorted(all_spec_ids)
-            logger.info(f"Sales scrape {game_id}: {len(spec_list)} spec IDs, {len(spec_to_tcg)} matched to catalog")
-
-            if not spec_list:
-                _last_result = {
-                    "status": "skipped",
-                    "job": "sales",
-                    "reason": f"No spec IDs found for {game_id}",
-                    "duration_ms": int((time.time() - start) * 1000),
-                }
-                return
-
-            # Scrape sales in batches via Playwright
-            results = await scrape_sales_batch(spec_list)
-
-            # Flatten, match tcg_product_id, and insert
-            all_sales = []
-            for spec_id, sales in results.items():
-                for s in sales:
-                    s["game_id"] = game_id
-                    s["tcg_product_id"] = spec_to_tcg.get(spec_id)
-                all_sales.extend(sales)
-
-            inserted = await upsert_sales_history(client, all_sales)
-
-            duration_ms = int((time.time() - start) * 1000)
-            _last_result = {
-                "status": "success",
-                "job": "sales",
-                "game": game_id,
-                "specs_scraped": len(spec_list),
-                "sales_found": len(all_sales),
-                "sales_inserted": inserted,
-                "duration_ms": duration_ms,
-            }
-            logger.info(f"Sales scrape complete: {_last_result}")
-            await log_scrape(client, _last_result)
-
-        except Exception as e:
-            duration_ms = int((time.time() - start) * 1000)
-            _last_result = {
-                "status": "failed",
-                "job": "sales",
-                "error": str(e),
-                "duration_ms": duration_ms,
-            }
-            logger.error(f"Sales scrape failed: {e}", exc_info=True)
-            try:
-                await log_scrape(client, _last_result)
-            except Exception:
-                pass
-        finally:
-            await client.aclose()

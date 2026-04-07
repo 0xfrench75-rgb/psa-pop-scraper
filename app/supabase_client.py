@@ -79,14 +79,14 @@ async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int
     # Collect full grade data for bulk upsert to psa_pop_data
     pop_rows = []
 
+    # Batch PATCH arbitrage table - collect all tcg_product_ids first, then patch in chunks
     for u in updates:
-        # 1. PATCH arbitrage table (legacy - psa9, psa10, total only)
-        url = f"{REST_URL}/psa_arbitrage_opportunities?tcg_product_id=eq.{u['tcg_product_id']}"
         psa10 = u["psa10_pop"]
+        psa9 = u.get("psa9_pop", 0)
         total = u["total_pop"]
         rate = round(psa10 / total * 100, 2) if total > 0 else None
         body = {
-            "psa9_pop": u.get("psa9_pop"),
+            "psa9_pop": psa9,
             "psa10_pop": psa10,
             "total_pop": total,
             "psa10_rate": rate,
@@ -94,6 +94,9 @@ async def update_pop_data(client: httpx.AsyncClient, updates: list[dict]) -> int
         }
         if u.get("spec_id"):
             body["psa_spec_id"] = u["spec_id"]
+
+        # PATCH only updates existing rows (cards already in arbitrage table from eBay sync)
+        url = f"{REST_URL}/psa_arbitrage_opportunities?tcg_product_id=eq.{u['tcg_product_id']}"
         resp = await client.patch(url, json=body, headers=headers)
         if resp.status_code < 300:
             updated += 1
@@ -174,35 +177,6 @@ async def get_spec_ids_for_game(client: httpx.AsyncClient, game_id: str) -> list
     resp = await client.get(url, headers=headers)
     resp.raise_for_status()
     return resp.json()
-
-
-async def upsert_sales_history(client: httpx.AsyncClient, sales: list[dict]) -> int:
-    """Insert sales history rows into psa_sales_history.
-
-    Uses upsert (ON CONFLICT DO NOTHING) to avoid duplicates on (spec_id, sold_at, price_cents, grade).
-    Returns count of inserted rows.
-    """
-    if not sales:
-        return 0
-    url = f"{REST_URL}/psa_sales_history"
-    headers = {
-        **HEADERS,
-        "Content-Profile": "shared",
-        "Prefer": "resolution=ignore-duplicates,return=minimal",
-    }
-    now = datetime.now(timezone.utc).isoformat()
-    rows = [{**s, "fetched_at": now} for s in sales]
-
-    # Insert in chunks of 50
-    inserted = 0
-    for i in range(0, len(rows), 50):
-        chunk = rows[i : i + 50]
-        resp = await client.post(url, json=chunk, headers=headers)
-        if resp.status_code < 300:
-            inserted += len(chunk)
-        else:
-            logger.warning(f"Sales insert failed: {resp.status_code} {resp.text[:200]}")
-    return inserted
 
 
 async def log_scrape(client: httpx.AsyncClient, result: dict) -> None:
