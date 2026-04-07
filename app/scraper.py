@@ -36,6 +36,18 @@ EXCLUDE_LANGS = [
 ]
 DISCOVERY_DELAY = 2.0  # Slower delay for discovery crawl (avoid rate limit)
 
+# Hardcoded fallback sets when discovery crawl is blocked by Cloudflare.
+# These are known PSA set IDs verified to return data via GetSetItems API.
+# Updated: 2026-04-07
+FALLBACK_SETS = [
+    # Sorcery: Contested Realm
+    {"game_id": "sorcery", "psa_set_id": 249139, "psa_set_slug": "sorcery-contested-realm-alpha", "psa_year": "2023"},
+    {"game_id": "sorcery", "psa_set_id": 253551, "psa_set_slug": "sorcery-contested-realm-beta", "psa_year": "2023"},
+    {"game_id": "sorcery", "psa_set_id": 285886, "psa_set_slug": "sorcery-contested-realm-arthurian-legends", "psa_year": "2024"},
+    {"game_id": "sorcery", "psa_set_id": 274307, "psa_set_slug": "sorcery-contested-realm-dust-rewards", "psa_year": "2024"},
+    {"game_id": "sorcery", "psa_set_id": 311705, "psa_set_slug": "sorcery-contested-realm-dust-rewards", "psa_year": "2025"},
+]
+
 
 async def discover_all_sets() -> list[dict]:
     """Crawl PSA's pop report site to discover all TCG card sets for our games.

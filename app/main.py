@@ -16,7 +16,7 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from app.config import SCRAPER_API_KEY
-from app.scraper import scrape_sets, discover_all_sets
+from app.scraper import scrape_sets, discover_all_sets, FALLBACK_SETS
 from app.sales_scraper import scrape_sales_batch
 from app.matcher import match_cards, build_lookup, normalize
 from app.supabase_client import (
@@ -104,17 +104,12 @@ async def _run_scrape(game_id: str | None):
 
         client = httpx.AsyncClient(timeout=60)
         try:
-            # Auto-discover all sets from PSA website
+            # Auto-discover all sets from PSA website, fallback to hardcoded list
             logger.info("Discovering sets from PSA...")
             all_discovered = await discover_all_sets()
             if not all_discovered:
-                _last_result = {
-                    "status": "failed",
-                    "reason": "Set discovery returned 0 sets (PSA may be blocking)",
-                    "duration_ms": int((time.time() - start) * 1000),
-                }
-                await log_scrape(client, _last_result)
-                return
+                logger.warning("Discovery returned 0 sets - using fallback set list")
+                all_discovered = list(FALLBACK_SETS)
 
             # Filter to requested game if specified
             if game_id:
