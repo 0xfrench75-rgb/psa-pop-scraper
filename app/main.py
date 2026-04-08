@@ -21,6 +21,7 @@ from app.matcher import match_cards, build_lookup
 from app.supabase_client import (
     get_all_cards_for_game,
     update_pop_data,
+    bridge_pop_data,
     log_scrape,
 )
 
@@ -174,6 +175,10 @@ async def _run_scrape(game_id: str | None):
 
                 games_processed.append(gid)
 
+            # Bridge pop data: cross-match psa_pop_data -> psa_arbitrage_opportunities
+            # by normalized card_name + card_number (fixes tcg_product_id mismatch)
+            bridge_result = await bridge_pop_data(client)
+
             duration_ms = int((time.time() - start) * 1000)
             _last_result = {
                 "status": "success",
@@ -182,6 +187,7 @@ async def _run_scrape(game_id: str | None):
                 "matched": total_matched,
                 "unmatched": total_unmatched,
                 "updated": total_updated,
+                "bridge": bridge_result,
                 "duration_ms": duration_ms,
             }
             logger.info(f"Scrape complete: {_last_result}")

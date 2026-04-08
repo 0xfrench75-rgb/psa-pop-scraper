@@ -206,6 +206,24 @@ async def get_spec_ids_for_game(client: httpx.AsyncClient, game_id: str) -> list
     return resp.json()
 
 
+async def bridge_pop_data(client: httpx.AsyncClient) -> dict:
+    """Call bridge_psa_pop_data() RPC to cross-match pop data from psa_pop_data into psa_arbitrage_opportunities.
+
+    The PSA matcher and eBay matcher assign different tcg_product_ids for the same card.
+    This RPC bridges the gap by matching on normalized card_name + card_number + game_id.
+    """
+    url = f"{REST_URL}/rpc/bridge_psa_pop_data"
+    headers = {**HEADERS, "Content-Profile": "shared", "Accept-Profile": "shared"}
+    resp = await client.post(url, json={}, headers=headers)
+    if resp.status_code < 300:
+        result = resp.json()
+        logger.info(f"Bridge pop data: {result}")
+        return result
+    else:
+        logger.warning(f"Bridge pop data RPC failed: {resp.status_code} {resp.text[:200]}")
+        return {"error": resp.text[:200]}
+
+
 async def log_scrape(client: httpx.AsyncClient, result: dict) -> None:
     """Log scrape run to shared.cron_log following existing pattern."""
     url = f"{REST_URL}/cron_log"
