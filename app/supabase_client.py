@@ -193,17 +193,25 @@ async def _upsert_pop_data(client: httpx.AsyncClient, rows: list[dict]) -> int:
 
 
 async def get_spec_ids_for_game(client: httpx.AsyncClient, game_id: str) -> list[dict]:
-    """Get spec_ids from psa_pop_data for a game (cards we've already scraped pop for)."""
+    """Get spec_ids from psa_arbitrage_opportunities (cards we display in the PSA tab).
+
+    NOTE: WARNING — Previously pulled from psa_pop_data (7,358 rows for pokemon).
+    Playwright OOM'd on Render 512MB free tier trying to scrape all of them.
+    Now pulls only cards with arbitrage opportunities (~46 for pokemon).
+    """
     url = (
-        f"{REST_URL}/psa_pop_data"
-        f"?select=spec_id,tcg_product_id,card_name,game_id"
+        f"{REST_URL}/psa_arbitrage_opportunities"
+        f"?select=psa_spec_id,tcg_product_id,card_name,game_id"
         f"&game_id=eq.{game_id}"
-        f"&spec_id=gt.0"
+        f"&psa_spec_id=gt.0"
     )
     headers = {**HEADERS, "Accept-Profile": "shared"}
     resp = await client.get(url, headers=headers)
     resp.raise_for_status()
-    return resp.json()
+    # Rename psa_spec_id -> spec_id to match downstream expectations
+    return [{"spec_id": r["psa_spec_id"], "tcg_product_id": r["tcg_product_id"],
+             "card_name": r.get("card_name", ""), "game_id": r.get("game_id", game_id)}
+            for r in resp.json()]
 
 
 async def bridge_pop_data(client: httpx.AsyncClient) -> dict:
