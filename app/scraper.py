@@ -38,14 +38,65 @@ DISCOVERY_DELAY = 2.0  # Slower delay for discovery crawl (avoid rate limit)
 
 # Hardcoded fallback sets when discovery crawl is blocked by Cloudflare.
 # These are known PSA set IDs verified to return data via GetSetItems API.
-# Updated: 2026-04-07
+# NOTE: Context - Discovery fails ~50% of runs due to Cloudflare. Fallback must cover
+# all 4 games or Pokemon/One Piece/DBS get zero pop data on failed discovery runs.
+# Set IDs sourced from psa_pop_data (verified working as of 2026-04-06 successful scrape).
+# Updated: 2026-04-09
 FALLBACK_SETS = [
-    # Sorcery: Contested Realm
+    # Sorcery: Contested Realm (5 sets)
     {"game_id": "sorcery", "psa_set_id": 249139, "psa_set_slug": "sorcery-contested-realm-alpha", "psa_year": "2023"},
     {"game_id": "sorcery", "psa_set_id": 253551, "psa_set_slug": "sorcery-contested-realm-beta", "psa_year": "2023"},
     {"game_id": "sorcery", "psa_set_id": 285886, "psa_set_slug": "sorcery-contested-realm-arthurian-legends", "psa_year": "2024"},
     {"game_id": "sorcery", "psa_set_id": 274307, "psa_set_slug": "sorcery-contested-realm-dust-rewards", "psa_year": "2024"},
     {"game_id": "sorcery", "psa_set_id": 311705, "psa_set_slug": "sorcery-contested-realm-dust-rewards", "psa_year": "2025"},
+    # Pokemon (15 sets - all known sets with pop data, ~2k cards)
+    {"game_id": "pokemon", "psa_set_id": 194169, "psa_set_slug": "pokemon-set-194169", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 185226, "psa_set_slug": "pokemon-set-185226", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 172689, "psa_set_slug": "pokemon-set-172689", "psa_year": "2023"},
+    {"game_id": "pokemon", "psa_set_id": 178554, "psa_set_slug": "pokemon-set-178554", "psa_year": "2023"},
+    {"game_id": "pokemon", "psa_set_id": 175662, "psa_set_slug": "pokemon-set-175662", "psa_year": "2023"},
+    {"game_id": "pokemon", "psa_set_id": 189690, "psa_set_slug": "pokemon-set-189690", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 188712, "psa_set_slug": "pokemon-set-188712", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 189160, "psa_set_slug": "pokemon-set-189160", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 198449, "psa_set_slug": "pokemon-set-198449", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 181110, "psa_set_slug": "pokemon-set-181110", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 180955, "psa_set_slug": "pokemon-set-180955", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 177191, "psa_set_slug": "pokemon-set-177191", "psa_year": "2023"},
+    {"game_id": "pokemon", "psa_set_id": 188977, "psa_set_slug": "pokemon-set-188977", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 191201, "psa_set_slug": "pokemon-set-191201", "psa_year": "2024"},
+    {"game_id": "pokemon", "psa_set_id": 176382, "psa_set_slug": "pokemon-set-176382", "psa_year": "2023"},
+    # One Piece (top 15 sets - ~800 cards)
+    {"game_id": "one-piece", "psa_set_id": 224322, "psa_set_slug": "one-piece-set-224322", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 256095, "psa_set_slug": "one-piece-set-256095", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 231674, "psa_set_slug": "one-piece-set-231674", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 221039, "psa_set_slug": "one-piece-set-221039", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 221341, "psa_set_slug": "one-piece-set-221341", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 216442, "psa_set_slug": "one-piece-set-216442", "psa_year": "2023"},
+    {"game_id": "one-piece", "psa_set_id": 221340, "psa_set_slug": "one-piece-set-221340", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 221339, "psa_set_slug": "one-piece-set-221339", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 245295, "psa_set_slug": "one-piece-set-245295", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 241359, "psa_set_slug": "one-piece-set-241359", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 253406, "psa_set_slug": "one-piece-set-253406", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 252000, "psa_set_slug": "one-piece-set-252000", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 246059, "psa_set_slug": "one-piece-set-246059", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 234762, "psa_set_slug": "one-piece-set-234762", "psa_year": "2024"},
+    {"game_id": "one-piece", "psa_set_id": 245452, "psa_set_slug": "one-piece-set-245452", "psa_year": "2024"},
+    # Dragon Ball Super (top 15 sets - ~2k cards)
+    {"game_id": "dragon-ball-super", "psa_set_id": 185141, "psa_set_slug": "dbs-set-185141", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 202954, "psa_set_slug": "dbs-set-202954", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 178990, "psa_set_slug": "dbs-set-178990", "psa_year": "2023"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 175641, "psa_set_slug": "dbs-set-175641", "psa_year": "2023"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 198585, "psa_set_slug": "dbs-set-198585", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 188586, "psa_set_slug": "dbs-set-188586", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 193760, "psa_set_slug": "dbs-set-193760", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 200814, "psa_set_slug": "dbs-set-200814", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 192106, "psa_set_slug": "dbs-set-192106", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 185702, "psa_set_slug": "dbs-set-185702", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 179226, "psa_set_slug": "dbs-set-179226", "psa_year": "2023"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 200827, "psa_set_slug": "dbs-set-200827", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 200810, "psa_set_slug": "dbs-set-200810", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 190397, "psa_set_slug": "dbs-set-190397", "psa_year": "2024"},
+    {"game_id": "dragon-ball-super", "psa_set_id": 185676, "psa_set_slug": "dbs-set-185676", "psa_year": "2024"},
 ]
 
 
