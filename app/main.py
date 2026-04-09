@@ -67,11 +67,11 @@ async def status():
 async def test_sales(spec_id: int, request: Request):
     """Debug endpoint: test sales API for a single spec_id and return raw response."""
     _check_auth(request)
-    from curl_cffi.requests import AsyncSession
     url = f"https://www.psacard.com/api/psa/researchJourney/spec/{spec_id}/salesHistory"
     params = {"pn": 1, "ps": 5, "g": "", "q": "false", "gt": "ALL"}
-    async with AsyncSession(impersonate="chrome") as session:
-        resp = await session.get(url, params=params)
+    ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    async with httpx.AsyncClient(headers={"User-Agent": ua}, timeout=30) as client:
+        resp = await client.get(url, params=params)
         text = resp.text[:500]
         try:
             data = resp.json()
@@ -80,13 +80,13 @@ async def test_sales(spec_id: int, request: Request):
                 "total_count": data.get("totalCount", 0),
                 "sales_count": len(data.get("sales", [])),
                 "first_sale": data.get("sales", [None])[0] if data.get("sales") else None,
-                "is_cloudflare": "Just a moment" in text,
+                "is_blocked": "Security Check" in text,
             }
         except Exception:
             return {
                 "status_code": resp.status_code,
                 "raw_text": text,
-                "is_cloudflare": "Just a moment" in text,
+                "is_blocked": "Security Check" in text,
             }
 
 
