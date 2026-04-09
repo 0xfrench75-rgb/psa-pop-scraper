@@ -36,7 +36,7 @@ async def scrape_sales_page(session: AsyncSession, spec_id: int) -> list[dict]:
     params = {"pn": 1, "ps": 50, "g": "", "q": "false", "gt": "ALL"}
 
     try:
-        resp = await session.get(url, params=params, impersonate="chrome")
+        resp = await session.get(url, params=params)
         if resp.status_code == 403:
             logger.warning(f"Spec {spec_id}: Cloudflare 403 - may need rate limit adjustment")
             return []
@@ -44,8 +44,16 @@ async def scrape_sales_page(session: AsyncSession, spec_id: int) -> list[dict]:
             logger.error(f"Spec {spec_id}: HTTP {resp.status_code}")
             return []
 
+        # Check for Cloudflare challenge disguised as 200
+        text = resp.text
+        if "Just a moment" in text[:500] or "challenge-platform" in text[:500]:
+            logger.warning(f"Spec {spec_id}: Cloudflare challenge in 200 response")
+            return []
+
         data = resp.json()
+        total_count = data.get("totalCount", 0)
         raw_sales = data.get("sales", [])
+        logger.info(f"Spec {spec_id}: API returned totalCount={total_count}, sales={len(raw_sales)}")
 
         sales = []
         for entry in raw_sales:
