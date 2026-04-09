@@ -224,6 +224,39 @@ async def bridge_pop_data(client: httpx.AsyncClient) -> dict:
         return {"error": resp.text[:200]}
 
 
+async def write_sales_history(client: httpx.AsyncClient, sales: list[dict]) -> int:
+    """Upsert sales entries to psa_sales_history. ON CONFLICT(spec_id, sold_at, price_cents, grade) skip."""
+    import asyncio
+    if not sales:
+        return 0
+    headers = {
+        **HEADERS,
+        "Content-Profile": "shared",
+        "Prefer": "resolution=ignore-duplicates,return=minimal",
+    }
+    url = f"{REST_URL}/psa_sales_history"
+    upserted = 0
+    for i in range(0, len(sales), 50):
+        chunk = sales[i : i + 50]
+        for attempt in range(3):
+            try:
+                resp = await client.post(url, json=chunk, headers=headers)
+                if resp.status_code < 300:
+                    upserted += len(chunk)
+                else:
+                    logger.warning(f"Sales upsert failed: {resp.status_code} {resp.text[:200]}")
+                break
+            except Exception as e:
+                if attempt < 2:
+                    logger.warning(f"Sales upsert retry {attempt+1}: {e}")
+                    await asyncio.sleep((attempt + 1) * 5)
+                else:
+                    logger.error(f"Sales upsert failed after 3 attempts: {e}")
+        await asyncio.sleep(0.5)
+    logger.info(f"Upserted {upserted} sales rows to psa_sales_history")
+    return upserted
+
+
 async def log_scrape(client: httpx.AsyncClient, result: dict) -> None:
     """Log scrape run to shared.cron_log following existing pattern."""
     url = f"{REST_URL}/cron_log"

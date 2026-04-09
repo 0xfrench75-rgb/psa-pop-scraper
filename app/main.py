@@ -20,10 +20,13 @@ from app.scraper import scrape_sets, discover_all_sets, FALLBACK_SETS
 from app.matcher import match_cards, build_lookup
 from app.supabase_client import (
     get_all_cards_for_game,
+    get_spec_ids_for_game,
     update_pop_data,
     bridge_pop_data,
+    write_sales_history,
     log_scrape,
 )
+from app.sales_scraper import scrape_sales_batch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -77,6 +80,78 @@ async def scrape_all(request: Request, background_tasks: BackgroundTasks):
     background_tasks.add_task(_run_scrape, None)
     return {"message": "Scrape started for all games", "status": "queued"}
 
+
+@app.post("/scrape-sales/{game_id}")
+async def scrape_sales(game_id: str, request: Request, background_tasks: BackgroundTasks):
+    _check_auth(request)
+    if _scrape_lock.locked():
+        raise HTTPException(status_code=409, detail="Scrape already in progress")
+    background_tasks.add_task(_run_sales_scrape, game_id)
+    return {"message": f"Sales scrape started for {game_id}", "status": "queued"}
+
+
+async def _run_sales_scrape(game_id: str):
+    """Scrape PSA sales history via Playwright. Runs in background task."""
+    global _last_result
+    async with _scrape_lock:
+        start = time.time()
+        client = httpx.AsyncClient(timeout=60)
+        try:
+            # Get spec_ids from psa_pop_data (cards we already have pop data for)
+            specs = await get_spec_ids_for_game(client, game_id)
+            if not specs:
+                _last_result = {"status": "skipped", "reason": f"No spec_ids for {game_id}"}
+                return
+
+            spec_ids = [s["spec_id"] for s in specs if s.get("spec_id")]
+            # Build spec_id -> tcg_product_id + game_id lookup
+            spec_meta = {s["spec_id"]: s for s in specs if s.get("spec_id")}
+
+            logger.info(f"Sales scrape: {len(spec_ids)} specs for {game_id}")
+
+            # Scrape sales pages via Playwright (batched, memory-safe)
+            results = await scrape_sales_batch(spec_ids)
+
+            # Flatten and enrich with tcg_product_id + game_id
+            all_sales = []
+            for spec_id, sales in results.items():
+                meta = spec_meta.get(spec_id, {})
+                for s in sales:
+                    s["tcg_product_id"] = meta.get("tcg_product_id")
+                    s["game_id"] = game_id
+                    all_sales.append(s)
+
+            # Write to psa_sales_history
+            written = await write_sales_history(client, all_sales)
+
+            duration_ms = int((time.time() - start) * 1000)
+            _last_result = {
+                "status": "success",
+                "job": "sales_scrape",
+                "game_id": game_id,
+                "specs_scraped": len(spec_ids),
+                "sales_found": len(all_sales),
+                "sales_written": written,
+                "duration_ms": duration_ms,
+            }
+            logger.info(f"Sales scrape complete: {_last_result}")
+            await log_scrape(client, _last_result)
+
+        except Exception as e:
+            duration_ms = int((time.time() - start) * 1000)
+            _last_result = {
+                "status": "failed",
+                "job": "sales_scrape",
+                "error": str(e),
+                "duration_ms": duration_ms,
+            }
+            logger.error(f"Sales scrape failed: {e}", exc_info=True)
+            try:
+                await log_scrape(client, _last_result)
+            except Exception:
+                pass
+        finally:
+            await client.aclose()
 
 
 async def _run_scrape(game_id: str | None):
