@@ -63,6 +63,33 @@ async def status():
     return {"last_result": _last_result, "lock_held": _scrape_lock.locked()}
 
 
+@app.get("/test-sales/{spec_id}")
+async def test_sales(spec_id: int, request: Request):
+    """Debug endpoint: test sales API for a single spec_id and return raw response."""
+    _check_auth(request)
+    from curl_cffi.requests import AsyncSession
+    url = f"https://www.psacard.com/api/psa/researchJourney/spec/{spec_id}/salesHistory"
+    params = {"pn": 1, "ps": 5, "g": "", "q": "false", "gt": "ALL"}
+    async with AsyncSession(impersonate="chrome") as session:
+        resp = await session.get(url, params=params)
+        text = resp.text[:500]
+        try:
+            data = resp.json()
+            return {
+                "status_code": resp.status_code,
+                "total_count": data.get("totalCount", 0),
+                "sales_count": len(data.get("sales", [])),
+                "first_sale": data.get("sales", [None])[0] if data.get("sales") else None,
+                "is_cloudflare": "Just a moment" in text,
+            }
+        except Exception:
+            return {
+                "status_code": resp.status_code,
+                "raw_text": text,
+                "is_cloudflare": "Just a moment" in text,
+            }
+
+
 @app.post("/scrape/{game_id}")
 async def scrape_game(game_id: str, request: Request, background_tasks: BackgroundTasks):
     _check_auth(request)
