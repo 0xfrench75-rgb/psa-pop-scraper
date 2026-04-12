@@ -242,6 +242,26 @@ async def write_sales_history(client: httpx.AsyncClient, sales: list[dict]) -> i
     import asyncio
     if not sales:
         return 0
+
+    # NOTE: Context - PSA API returns duplicate sales (same spec_id+sold_at+price+grade)
+    # which breaks ON CONFLICT DO UPDATE ("cannot affect row a second time", SQLSTATE 21000).
+    # Dedupe by the unique-index key, preferring entries with cert_number/listing_url set.
+    seen = {}
+    for s in sales:
+        key = (s.get("spec_id"), s.get("sold_at"), s.get("price_cents"), s.get("grade"))
+        prev = seen.get(key)
+        if prev is None:
+            seen[key] = s
+        else:
+            # Keep the row with more data (cert_number > None, listing_url > None)
+            prev_score = int(bool(prev.get("cert_number"))) + int(bool(prev.get("listing_url")))
+            s_score = int(bool(s.get("cert_number"))) + int(bool(s.get("listing_url")))
+            if s_score > prev_score:
+                seen[key] = s
+    deduped = list(seen.values())
+    if len(deduped) < len(sales):
+        logger.info(f"Deduped sales: {len(sales)} -> {len(deduped)}")
+
     headers = {
         **HEADERS,
         "Content-Profile": "shared",
@@ -251,8 +271,8 @@ async def write_sales_history(client: httpx.AsyncClient, sales: list[dict]) -> i
     # indexes. Without it, PostgREST errors out. Target the primary sales dedup index.
     url = f"{REST_URL}/psa_sales_history?on_conflict=spec_id,sold_at,price_cents,grade"
     upserted = 0
-    for i in range(0, len(sales), 50):
-        chunk = sales[i : i + 50]
+    for i in range(0, len(deduped), 50):
+        chunk = deduped[i : i + 50]
         for attempt in range(3):
             try:
                 resp = await client.post(url, json=chunk, headers=headers)
