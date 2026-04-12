@@ -247,7 +247,9 @@ async def write_sales_history(client: httpx.AsyncClient, sales: list[dict]) -> i
         "Content-Profile": "shared",
         "Prefer": "resolution=merge-duplicates,return=minimal",
     }
-    url = f"{REST_URL}/psa_sales_history"
+    # NOTE: Context - on_conflict= required with merge-duplicates when table has multiple unique
+    # indexes. Without it, PostgREST errors out. Target the primary sales dedup index.
+    url = f"{REST_URL}/psa_sales_history?on_conflict=spec_id,sold_at,price_cents,grade"
     upserted = 0
     for i in range(0, len(sales), 50):
         chunk = sales[i : i + 50]
@@ -257,7 +259,7 @@ async def write_sales_history(client: httpx.AsyncClient, sales: list[dict]) -> i
                 if resp.status_code < 300:
                     upserted += len(chunk)
                 else:
-                    logger.warning(f"Sales upsert failed: {resp.status_code} {resp.text[:200]}")
+                    logger.warning(f"Sales upsert failed: {resp.status_code} {resp.text[:300]}")
                 break
             except Exception as e:
                 if attempt < 2:
