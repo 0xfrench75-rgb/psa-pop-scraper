@@ -1,3 +1,7 @@
+# @cnote[psa-scraper-deploy-repo] DEPENDS - Code lives in 069/psa-scraper/ but deploys from separate repo
+# /Users/epop/psa-pop-scraper/ -> github.com/0xfrench75-rgb/psa-pop-scraper.
+# Must copy files manually and push to deploy. Changes here are NOT live
+# until copied to deploy repo and Render deploy hook is triggered.
 """PSA Population Scraper - FastAPI service.
 
 Bulk population data via PSA's /Pop/GetSetItems JSON API (curl_cffi).
@@ -17,7 +21,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from app.config import SCRAPER_API_KEY
 from app.scraper import scrape_sets, discover_all_sets, FALLBACK_SETS
-from app.matcher import match_cards, build_lookup
+from app.matcher import match_cards, build_lookup, build_code_lookup
 from app.supabase_client import (
     get_all_cards_for_game,
     get_spec_ids_for_game,
@@ -189,6 +193,7 @@ async def _run_scrape(game_id: str | None):
         total_matched = 0
         total_unmatched = 0
         total_updated = 0
+        match_methods = {"card_code": 0, "name_exact": 0, "name_fuzzy": 0}
         games_processed = []
 
         client = httpx.AsyncClient(timeout=60)
@@ -220,7 +225,8 @@ async def _run_scrape(game_id: str | None):
                     logger.warning(f"No cards in DB for game {gid}")
                     continue
                 lookup = build_lookup(our_cards)
-                logger.info(f"  Loaded {len(our_cards)} catalog cards for matching")
+                code_lookup, suffix_lookup = build_code_lookup(our_cards)
+                logger.info(f"  Loaded {len(our_cards)} catalog cards for matching ({len(code_lookup)} code entries)")
 
                 # Scrape all sets for this game
                 scraped_by_set = await scrape_sets(sets)
@@ -231,9 +237,12 @@ async def _run_scrape(game_id: str | None):
                     if not scraped_cards:
                         continue
 
-                    matched, unmatched = match_cards(scraped_cards, lookup)
+                    matched, unmatched = match_cards(scraped_cards, lookup, code_lookup, suffix_lookup)
                     total_matched += len(matched)
                     total_unmatched += len(unmatched)
+                    for c in matched:
+                        method = c.get("match_method", "unknown")
+                        match_methods[method] = match_methods.get(method, 0) + 1
 
                     # Write population data to Supabase (full grade distribution)
                     if matched:
@@ -288,6 +297,7 @@ async def _run_scrape(game_id: str | None):
                 "sets_scraped": len(all_discovered),
                 "matched": total_matched,
                 "unmatched": total_unmatched,
+                "match_methods": match_methods,
                 "updated": total_updated,
                 "bridge": bridge_result,
                 "duration_ms": duration_ms,

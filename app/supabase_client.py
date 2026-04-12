@@ -33,7 +33,7 @@ async def get_cards_for_group(client: httpx.AsyncClient, group_id: int) -> list[
     """Fetch cards for a TCGplayer group (set) for matching."""
     url = (
         f"{REST_URL}/cards"
-        f"?select=tcg_product_id,clean_name,name"
+        f"?select=tcg_product_id,clean_name,name,card_number"
         f"&group_id=eq.{group_id}"
     )
     headers = {**HEADERS, "Accept-Profile": "shared"}
@@ -51,7 +51,7 @@ async def get_all_cards_for_game(client: httpx.AsyncClient, game_id: str) -> lis
     while True:
         url = (
             f"{REST_URL}/cards"
-            f"?select=tcg_product_id,clean_name,name"
+            f"?select=tcg_product_id,clean_name,name,card_number"
             f"&game_id=eq.{game_id}"
             f"&order=tcg_product_id"
             f"&offset={offset}&limit={page_size}"
@@ -232,15 +232,20 @@ async def bridge_pop_data(client: httpx.AsyncClient) -> dict:
         return {"error": resp.text[:200]}
 
 
+# @cnote[psa-scraper-merge-dupes] WARNING - merge-duplicates backfills cert/URL into existing rows.
 async def write_sales_history(client: httpx.AsyncClient, sales: list[dict]) -> int:
-    """Upsert sales entries to psa_sales_history. ON CONFLICT(spec_id, sold_at, price_cents, grade) skip."""
+    """Upsert sales entries to psa_sales_history. ON CONFLICT(spec_id, sold_at, price_cents, grade) merge.
+
+    NOTE: Context - Changed from ignore-duplicates to merge-duplicates so re-scraping the same
+    sales backfills cert_number, listing_url, image_url into existing rows that had NULLs.
+    """
     import asyncio
     if not sales:
         return 0
     headers = {
         **HEADERS,
         "Content-Profile": "shared",
-        "Prefer": "resolution=ignore-duplicates,return=minimal",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
     }
     url = f"{REST_URL}/psa_sales_history"
     upserted = 0

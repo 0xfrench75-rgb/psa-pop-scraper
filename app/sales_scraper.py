@@ -1,3 +1,4 @@
+# @cnote[psa-scraper-no-ebay-item-id] WARNING - Do NOT add ebay_item_id until migration runs on prod.
 """PSA sales history scraper via JSON API (no browser needed).
 
 Fetches sales data from PSA's internal API:
@@ -99,6 +100,12 @@ def _parse_api_sale(entry: dict, spec_id: int) -> dict | None:
         "sale_type": entry.get("saleType", "Unknown"),
         "sold_at": sold_at,
         "auction_house": entry.get("auctionHouse", "eBay"),
+        # NOTE: Context - These fields were always available from PSA API but never stored.
+        # cert_number + listing_url enable direct FK chain to ebay_sold_history.
+        # ebay_item_id extractable from listing_url via regex /itm/(\d+) when column is added.
+        "cert_number": str(entry["certNumber"]) if entry.get("certNumber") else None,
+        "listing_url": entry.get("listingURL") or None,
+        "image_url": entry.get("imageURL") or None,
     }
 
 
