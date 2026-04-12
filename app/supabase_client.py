@@ -214,6 +214,32 @@ async def get_spec_ids_for_game(client: httpx.AsyncClient, game_id: str) -> list
             for r in resp.json()]
 
 
+async def get_all_arb_spec_ids(client: httpx.AsyncClient) -> list[dict]:
+    """Get distinct spec_ids from ALL arb opportunities regardless of game_id.
+
+    NOTE: Context - Some arb rows have wrong game_id labels (e.g., One Piece card tagged
+    "yugioh"). Per-game scraping misses those. PSA's salesHistory endpoint doesn't need
+    game_id - only spec_id - so we scrape them all in one pass.
+    """
+    url = (
+        f"{REST_URL}/psa_arbitrage_opportunities"
+        f"?select=psa_spec_id,tcg_product_id,card_name,game_id"
+        f"&psa_spec_id=gt.0"
+    )
+    headers = {**HEADERS, "Accept-Profile": "shared"}
+    resp = await client.get(url, headers=headers)
+    resp.raise_for_status()
+    rows = resp.json()
+    # Dedupe by spec_id, prefer rows with truthy game_id
+    seen: dict[int, dict] = {}
+    for r in rows:
+        sid = r["psa_spec_id"]
+        if sid not in seen or (not seen[sid].get("game_id") and r.get("game_id")):
+            seen[sid] = {"spec_id": sid, "tcg_product_id": r["tcg_product_id"],
+                         "card_name": r.get("card_name", ""), "game_id": r.get("game_id", "")}
+    return list(seen.values())
+
+
 async def bridge_pop_data(client: httpx.AsyncClient) -> dict:
     """Call bridge_psa_pop_data() RPC to cross-match pop data from psa_pop_data into psa_arbitrage_opportunities.
 

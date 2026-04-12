@@ -25,6 +25,7 @@ from app.matcher import match_cards, build_lookup, build_code_lookup
 from app.supabase_client import (
     get_all_cards_for_game,
     get_spec_ids_for_game,
+    get_all_arb_spec_ids,
     update_pop_data,
     bridge_pop_data,
     write_sales_history,
@@ -121,35 +122,56 @@ async def scrape_sales(game_id: str, request: Request, background_tasks: Backgro
     return {"message": f"Sales scrape started for {game_id}", "status": "queued"}
 
 
-async def _run_sales_scrape(game_id: str):
-    """Scrape PSA sales history via Playwright. Runs in background task."""
+@app.post("/scrape-sales-all-arb")
+async def scrape_sales_all_arb(request: Request, background_tasks: BackgroundTasks):
+    """Scrape sales for EVERY arb spec_id regardless of game_id label.
+
+    Catches arb rows with mislabeled game_id that per-game scrapes miss.
+    """
+    _check_auth(request)
+    if _scrape_lock.locked():
+        raise HTTPException(status_code=409, detail="Scrape already in progress")
+    background_tasks.add_task(_run_sales_scrape, None)
+    return {"message": "Sales scrape started for all arb specs", "status": "queued"}
+
+
+async def _run_sales_scrape(game_id: str | None):
+    """Scrape PSA sales history via Playwright. Runs in background task.
+
+    When game_id is None, scrapes every distinct spec_id across all arb rows
+    regardless of game_id label (catches mislabeled rows).
+    """
     global _last_result
     async with _scrape_lock:
         start = time.time()
         client = httpx.AsyncClient(timeout=60)
         try:
-            # Get spec_ids from psa_pop_data (cards we already have pop data for)
-            specs = await get_spec_ids_for_game(client, game_id)
+            if game_id is None:
+                specs = await get_all_arb_spec_ids(client)
+                scope_label = "all arb"
+            else:
+                specs = await get_spec_ids_for_game(client, game_id)
+                scope_label = game_id
             if not specs:
-                _last_result = {"status": "skipped", "reason": f"No spec_ids for {game_id}"}
+                _last_result = {"status": "skipped", "reason": f"No spec_ids for {scope_label}"}
                 return
 
             spec_ids = [s["spec_id"] for s in specs if s.get("spec_id")]
             # Build spec_id -> tcg_product_id + game_id lookup
             spec_meta = {s["spec_id"]: s for s in specs if s.get("spec_id")}
 
-            logger.info(f"Sales scrape: {len(spec_ids)} specs for {game_id}")
+            logger.info(f"Sales scrape: {len(spec_ids)} specs for {scope_label}")
 
             # Scrape sales pages via Playwright (batched, memory-safe)
             results = await scrape_sales_batch(spec_ids)
 
-            # Flatten and enrich with tcg_product_id + game_id
+            # Flatten and enrich with tcg_product_id + game_id from meta
             all_sales = []
             for spec_id, sales in results.items():
                 meta = spec_meta.get(spec_id, {})
                 for s in sales:
                     s["tcg_product_id"] = meta.get("tcg_product_id")
-                    s["game_id"] = game_id
+                    s["game_id"] = meta.get("game_id") or game_id
                     all_sales.append(s)
 
             # Write to psa_sales_history
@@ -159,7 +181,7 @@ async def _run_sales_scrape(game_id: str):
             _last_result = {
                 "status": "success",
                 "job": "sales_scrape",
-                "game_id": game_id,
+                "game_id": game_id or "all",
                 "specs_scraped": len(spec_ids),
                 "sales_found": len(all_sales),
                 "sales_written": written,
